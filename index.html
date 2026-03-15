@@ -790,7 +790,19 @@ function renderMonth() {
     grid.appendChild(row);
   });
 
-  // Grid always starts from day 1 — today is highlighted, user scrolls naturally
+  // Scroll so today's row appears near the top with some breathing room
+  if (currentMonth === todayMonth && todayRow) {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const scroller = document.getElementById('daysScroll');
+        const scrollerRect = scroller.getBoundingClientRect();
+        const rowRect = todayRow.getBoundingClientRect();
+        const rowRelativeTop = rowRect.top - scrollerRect.top + scroller.scrollTop;
+        // Show 2 rows above today for context — approx 80px
+        scroller.scrollTop = Math.max(0, rowRelativeTop - 80);
+      });
+    });
+  }
 }
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
