@@ -790,20 +790,7 @@ function renderMonth() {
     grid.appendChild(row);
   });
 
-  // Scroll so today's row is centered in the visible scroll area
-  if (currentMonth === todayMonth && todayRow) {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const scroller = document.getElementById('daysScroll');
-        const scrollerRect = scroller.getBoundingClientRect();
-        const rowRect = todayRow.getBoundingClientRect();
-        // rowRect is relative to viewport; convert to position within scroller
-        const rowRelativeTop = rowRect.top - scrollerRect.top + scroller.scrollTop;
-        const centeredScrollTop = rowRelativeTop - (scroller.clientHeight / 2) + (rowRect.height / 2);
-        scroller.scrollTop = Math.max(0, centeredScrollTop);
-      });
-    });
-  }
+  // Grid always starts from day 1 — today is highlighted, user scrolls naturally
 }
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
