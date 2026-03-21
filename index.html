@@ -2024,8 +2024,22 @@ async function initSession() {
   if (session) {
     await loadProfile(session.user);
     readChapters = await loadReadChaptersFromDB(activeYear);
+    renderHome(); // re-render com dados do usuário logado
   }
-  renderHome();
+  // Atualizar ícone do usuário se logado
+  updateUserIcon();
+}
+
+function updateUserIcon() {
+  const btn = document.getElementById('userBtn');
+  if (!btn) return;
+  if (currentUser) {
+    btn.title = currentUser.nome + ' ' + currentUser.sobrenome;
+    btn.style.opacity = '1';
+  } else {
+    btn.title = 'Entrar / Minha conta';
+    btn.style.opacity = '0.7';
+  }
 }
 
 async function loadProfile(authUser) {
@@ -2072,10 +2086,11 @@ supa.auth.onAuthStateChange(async (event, session) => {
     readChapters = await loadReadChaptersFromDB(activeYear);
     closePanel('panelLogin');
     renderHome();
+    updateUserIcon();
   } else if (event === 'SIGNED_OUT') {
     currentUser = null;
     readChapters = new Set();
-    renderHome();
+    updateUserIcon();
   }
 });
 
@@ -2180,7 +2195,7 @@ async function doLogout() {
   activeYear = new Date().getFullYear();
   closePanel('panelConfig');
   closeMenu();
-  renderHome();
+  updateUserIcon();
 }
 
 // ── PLAN SELECTION ───────────────────────────────────
@@ -2793,7 +2808,10 @@ async function masterTogglePerfil(userId, novoPerfil) {
 }
 
 
-// Inicializar sessão Supabase
+// Renderizar home imediatamente (conteúdo público, não precisa de auth)
+renderHome();
+
+// Inicializar sessão Supabase em background (atualiza ícone se logado)
 initSession();
 
 </script>
