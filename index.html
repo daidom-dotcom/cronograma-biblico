@@ -1116,7 +1116,7 @@
 <div class="panel" id="panelLogin">
   <div class="panel-header">
     <button class="panel-back" onclick="closePanel('panelLogin')">←</button>
-    <span class="panel-title">Acesso <span style="font-size:10px;opacity:0.4;font-weight:300;">v1.3</span></span>
+    <span class="panel-title">Acesso <span style="font-size:10px;opacity:0.4;font-weight:300;">v1.4</span></span>
   </div>
   <div class="panel-body">
     <div class="login-wrap">
@@ -2045,18 +2045,24 @@ function updateUserIcon() {
 async function loadProfile(authUser) {
   console.log('[loadProfile] buscando id:', authUser.id);
   let profile = null, error = null;
-  try {
-    const result = await Promise.race([
-      supa.from('profiles').select('nome, sobrenome, perfil, ativo').eq('id', authUser.id).maybeSingle(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
-    ]);
-    profile = result.data;
-    error = result.error;
-  } catch(e) {
-    console.error('[loadProfile] timeout ou erro:', e.message);
-    return;
+  // Tenta até 3 vezes com timeout crescente (banco pode estar acordando)
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const timeoutMs = attempt * 8000; // 8s, 16s, 24s
+    console.log('[loadProfile] tentativa', attempt, 'timeout:', timeoutMs/1000 + 's');
+    try {
+      const result = await Promise.race([
+        supa.from('profiles').select('nome, sobrenome, perfil, ativo').eq('id', authUser.id).maybeSingle(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs))
+      ]);
+      profile = result.data;
+      error = result.error;
+      console.log('[loadProfile] data:', profile, 'error:', error);
+      break; // sucesso, sai do loop
+    } catch(e) {
+      console.warn('[loadProfile] tentativa', attempt, 'falhou:', e.message);
+      if (attempt === 3) return; // desiste após 3 tentativas
+    }
   }
-  console.log('[loadProfile] data:', profile, 'error:', error);
   if (!profile) return;
   if (profile.ativo === false) {
     await supa.auth.signOut();
