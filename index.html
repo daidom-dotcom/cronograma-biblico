@@ -2029,12 +2029,18 @@ async function initSession() {
 }
 
 async function loadProfile(authUser) {
-  const { data: profile } = await supa
+  const { data: profile, error } = await supa
     .from('profiles')
     .select('nome, sobrenome, perfil, ativo')
     .eq('id', authUser.id)
-    .single();
+    .maybeSingle();
+  console.log('[loadProfile] data:', profile, 'error:', error);
   if (!profile) return;
+  if (profile.ativo === false) {
+    await supa.auth.signOut();
+    showMsg('loginMsg', 'Esta conta está inativa. Fale com o administrador.', 'error');
+    return;
+  }
   currentUser = {
     id: authUser.id,
     email: authUser.email,
