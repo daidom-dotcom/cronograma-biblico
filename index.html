@@ -2047,8 +2047,22 @@ async function loadProfile(authUser) {
 
 // Escutar mudanças de auth (login/logout automático)
 supa.auth.onAuthStateChange(async (event, session) => {
+  console.log('[Auth]', event, session?.user?.email);
   if (event === 'SIGNED_IN' && session) {
     await loadProfile(session.user);
+    console.log('[Auth] currentUser após loadProfile:', currentUser);
+    if (!currentUser) {
+      // Profile ainda não existe — cria agora
+      const meta = session.user.user_metadata || {};
+      await supa.from('profiles').upsert({
+        id: session.user.id,
+        nome: meta.nome || session.user.email.split('@')[0],
+        sobrenome: meta.sobrenome || '',
+        perfil: 'comum',
+        ativo: true
+      });
+      await loadProfile(session.user);
+    }
     readChapters = await loadReadChaptersFromDB(activeYear);
     closePanel('panelLogin');
     renderHome();
