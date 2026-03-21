@@ -10,6 +10,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <link rel="manifest" href="site.webmanifest">
 <meta name="theme-color" content="#000000">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -1904,13 +1905,14 @@ function renderMonth() {
 }
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
-renderProgress();
-renderNav();
-renderMonth();
-
+function renderHome() {
+  renderProgress();
+  renderNav();
+  renderMonth();
+}
 
 // ══════════════════════════════════════════════════════
-//  USER SYSTEM — localStorage-based (ready for Supabase)
+//  USER SYSTEM — Supabase
 // ══════════════════════════════════════════════════════
 
 // ── BIBLE BOOKS with chapter counts ──────────────────
@@ -1955,58 +1957,55 @@ const BIBLE_BOOKS = [
 
 const TOTAL_CHAPTERS = BIBLE_BOOKS.reduce((s, b) => s + b.ch, 0); // 1189
 
-// ── STORAGE HELPERS ──────────────────────────────────
-function saveUser(user) { localStorage.setItem('fer_user', JSON.stringify(user)); }
-function loadUser() {
-  try { return JSON.parse(localStorage.getItem('fer_user')); } catch { return null; }
-}
+// ── SUPABASE ─────────────────────────────────────────
+const SUPA_URL = 'https://ihypiiiohelcepetyttf.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImloeXBpaWlvaGVsY2VwZXR5dHRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxMTc3NTUsImV4cCI6MjA4OTY5Mzc1NX0.-hMzSjKV49l0iGH15LjqiZAb5tGfnkUesDRPIs3HP6k';
+const supa = window.supabase.createClient(SUPA_URL, SUPA_KEY);
 
-// Year-aware chapter storage
-function readKey(email, year) { return 'fer_read_' + email + '_' + year; }
-function globalReadKey() { return 'fer_read'; }
-
-function saveReadChapters(chapters, year) {
-  const yr = year || activeYear;
-  if (currentUser) {
-    localStorage.setItem(readKey(currentUser.email, yr), JSON.stringify([...chapters]));
-  }
-  localStorage.setItem(globalReadKey(), JSON.stringify([...chapters]));
-}
-function loadReadChapters(year) {
-  const yr = year || activeYear;
-  try {
-    if (currentUser) {
-      const val = localStorage.getItem(readKey(currentUser.email, yr));
-      if (val) return new Set(JSON.parse(val));
-    }
-    return new Set(JSON.parse(localStorage.getItem(globalReadKey()) || '[]'));
-  } catch { return new Set(); }
-}
-
-// Get list of years that have any data for this user
-function getAvailableYears() {
-  const thisYear = new Date().getFullYear();
-  const years = new Set([thisYear]);
-  if (currentUser) {
-    for (let k in localStorage) {
-      const m = k.match(/^fer_read_[^_]+_(\d{4})$/);
-      if (m) years.add(parseInt(m[1]));
-    }
-  }
-  return [...years].sort((a, b) => b - a); // newest first
-}
+// ── STATE ────────────────────────────────────────────
+let currentUser = null;   // { id, email, nome, sobrenome, perfil, ativo }
+let activeYear = new Date().getFullYear();
+let readChapters = new Set();
+let selectedPlan = parseInt(localStorage.getItem('fer_plan') || '0');
 
 function saveSelectedPlan(idx) { localStorage.setItem('fer_plan', String(idx)); }
 function loadSelectedPlan() { return parseInt(localStorage.getItem('fer_plan') || '0'); }
 
-// ── STATE ────────────────────────────────────────────
-let currentUser = loadUser();
-let activeYear = new Date().getFullYear();
-let readChapters = new Set(); // populated after user load
-let selectedPlan = loadSelectedPlan();
+// ── SUPABASE: STORAGE DE CAPÍTULOS ───────────────────
+async function loadReadChaptersFromDB(year) {
+  if (!currentUser) return new Set();
+  const yr = year || activeYear;
+  const { data, error } = await supa
+    .from('reading_progress')
+    .select('book_abbr, chapter')
+    .eq('user_id', currentUser.id)
+    .eq('year', yr);
+  if (error || !data) return new Set();
+  return new Set(data.map(r => r.book_abbr + ':' + r.chapter));
+}
 
-// Init read chapters
-readChapters = loadReadChapters(activeYear);
+async function saveChapterToDB(bookAbbr, chapter, year, isMarked) {
+  if (!currentUser) return;
+  const yr = year || activeYear;
+  if (isMarked) {
+    await supa.from('reading_progress').upsert({
+      user_id: currentUser.id,
+      book_abbr: bookAbbr,
+      chapter: chapter,
+      year: yr
+    }, { onConflict: 'user_id,book_abbr,chapter,year' });
+  } else {
+    await supa.from('reading_progress').delete()
+      .eq('user_id', currentUser.id)
+      .eq('book_abbr', bookAbbr)
+      .eq('chapter', chapter)
+      .eq('year', yr);
+  }
+}
+
+function getAvailableYears() {
+  return [new Date().getFullYear()];
+}
 
 // ── CONTADOR DE ACESSOS ───────────────────────────────
 (function initAccessCounter() {
@@ -2015,18 +2014,56 @@ readChapters = loadReadChapters(activeYear);
     const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
     localStorage.setItem(key, count);
     const el = document.getElementById('accessCounter');
-    if (el) {
-      el.textContent = count.toLocaleString('pt-BR') + (count === 1 ? ' acesso' : ' acessos');
-    }
+    if (el) el.textContent = count.toLocaleString('pt-BR') + (count === 1 ? ' acesso' : ' acessos');
   } catch(e) {}
 })();
+
+// ── SUPABASE: CARREGAR SESSÃO INICIAL ────────────────
+async function initSession() {
+  const { data: { session } } = await supa.auth.getSession();
+  if (session) {
+    await loadProfile(session.user);
+    readChapters = await loadReadChaptersFromDB(activeYear);
+  }
+  renderHome();
+}
+
+async function loadProfile(authUser) {
+  const { data: profile } = await supa
+    .from('profiles')
+    .select('nome, sobrenome, perfil, ativo')
+    .eq('id', authUser.id)
+    .single();
+  if (!profile) return;
+  currentUser = {
+    id: authUser.id,
+    email: authUser.email,
+    nome: profile.nome,
+    sobrenome: profile.sobrenome,
+    perfil: profile.perfil,
+    ativo: profile.ativo
+  };
+}
+
+// Escutar mudanças de auth (login/logout automático)
+supa.auth.onAuthStateChange(async (event, session) => {
+  if (event === 'SIGNED_IN' && session) {
+    await loadProfile(session.user);
+    readChapters = await loadReadChaptersFromDB(activeYear);
+    closePanel('panelLogin');
+    renderHome();
+  } else if (event === 'SIGNED_OUT') {
+    currentUser = null;
+    readChapters = new Set();
+    renderHome();
+  }
+});
 
 // ── MENU ─────────────────────────────────────────────
 function openUserMenu() {
   if (!currentUser) { openPanel('panelLogin'); return; }
   const overlay = document.getElementById('menuOverlay');
   document.getElementById('menuUserName').textContent = currentUser.nome + ' ' + currentUser.sobrenome;
-  // Mostrar botão Config só para Master
   const configBtn = document.getElementById('menuConfig');
   if (configBtn) configBtn.style.display = currentUser.perfil === 'master' ? '' : 'none';
   overlay.classList.add('open');
@@ -2054,7 +2091,7 @@ function openPanel(id) {
     return; // silenciosamente ignora
   }
   document.getElementById(id).classList.add('open');
-  if (id === 'panelMeuPlano') renderMeuPlano();
+  if (id === 'panelMeuPlano') renderMeuPlano();   // async internamente
   if (id === 'panelConfig') renderConfig();
 }
 
@@ -2077,34 +2114,21 @@ function showMsg(id, text, type) {
   el.className = 'login-msg ' + type;
 }
 
-function doLogin() {
+async function doLogin() {
   const email = document.getElementById('loginEmail').value.trim().toLowerCase();
   const senha = document.getElementById('loginSenha').value;
   if (!email || !senha) { showMsg('loginMsg', 'Preencha e-mail e senha.', 'error'); return; }
 
-  const users = JSON.parse(localStorage.getItem('fer_users') || '[]');
-  const user = users.find(u => u.email === email && u.senha === senha);
-  if (!user) { showMsg('loginMsg', 'E-mail ou senha incorretos.', 'error'); return; }
-
-  // Bloquear usuário inativo
-  if (user.ativo === false) {
-    showMsg('loginMsg', 'Esta conta está inativa. Fale com o administrador.', 'error');
+  showMsg('loginMsg', 'Entrando…', '');
+  const { error } = await supa.auth.signInWithPassword({ email, password: senha });
+  if (error) {
+    showMsg('loginMsg', 'E-mail ou senha incorretos.', 'error');
     return;
   }
-
-  // Atualizar lastLogin na lista
-  user.lastLogin = new Date().toISOString();
-  localStorage.setItem('fer_users', JSON.stringify(users));
-
-  currentUser = user;
-  saveUser(user);
-  readChapters = loadReadChapters(activeYear);
-
-  showMsg('loginMsg', 'Bem-vindo(a), ' + user.nome + '!', 'success');
-  setTimeout(() => { closePanel('panelLogin'); }, 800);
+  // onAuthStateChange cuida do resto
 }
 
-function doCadastro() {
+async function doCadastro() {
   const nome = document.getElementById('cadNome').value.trim();
   const sobrenome = document.getElementById('cadSobrenome').value.trim();
   const email = document.getElementById('cadEmail').value.trim().toLowerCase();
@@ -2116,32 +2140,27 @@ function doCadastro() {
   if (email !== emailConf) { showMsg('cadMsg', 'Os e-mails não coincidem.', 'error'); return; }
   if (senha.length < 6) { showMsg('cadMsg', 'Senha deve ter pelo menos 6 caracteres.', 'error'); return; }
 
-  const users = JSON.parse(localStorage.getItem('fer_users') || '[]');
-  if (users.find(u => u.email === email)) { showMsg('cadMsg', 'Este e-mail já está cadastrado.', 'error'); return; }
-
-  // Primeiro cadastro vira Master; os demais são Comum
-  const isMaster = users.length === 0;
-  const newUser = { nome, sobrenome, email, senha, perfil: isMaster ? 'master' : 'comum', ativo: true, lastLogin: new Date().toISOString() };
-  users.push(newUser);
-  localStorage.setItem('fer_users', JSON.stringify(users));
-
-  currentUser = newUser;
-  saveUser(newUser);
-  readChapters = new Set();
-  saveReadChapters(readChapters, activeYear);
-
-  showMsg('cadMsg', 'Conta criada! Bem-vindo(a), ' + nome + '!', 'success');
-  setTimeout(() => { closePanel('panelLogin'); }, 800);
+  showMsg('cadMsg', 'Criando conta…', '');
+  const { error } = await supa.auth.signUp({
+    email,
+    password: senha,
+    options: { data: { nome, sobrenome, perfil: 'comum' } }
+  });
+  if (error) {
+    showMsg('cadMsg', error.message || 'Erro ao criar conta.', 'error');
+    return;
+  }
+  showMsg('cadMsg', 'Conta criada! Verifique seu e-mail para confirmar.', 'success');
 }
 
-function doLogout() {
+async function doLogout() {
+  await supa.auth.signOut();
   currentUser = null;
   readChapters = new Set();
   activeYear = new Date().getFullYear();
-  localStorage.removeItem('fer_user');
-  localStorage.removeItem('fer_read');
   closePanel('panelConfig');
   closeMenu();
+  renderHome();
 }
 
 // ── PLAN SELECTION ───────────────────────────────────
@@ -2216,14 +2235,19 @@ function renderYearSelector() {
   });
 }
 
-function switchYear(yr) {
+async function switchYear(yr) {
   activeYear = yr;
-  readChapters = loadReadChapters(yr);
+  readChapters = await loadReadChaptersFromDB(yr);
   renderMeuPlano();
 }
 
 // ── MEU PLANO ────────────────────────────────────────
-function renderMeuPlano() {
+async function renderMeuPlano() {
+  // Garantir que temos os dados do ano ativo
+  if (currentUser && readChapters.size === 0) {
+    readChapters = await loadReadChaptersFromDB(activeYear);
+  }
+
   // Year selector
   renderYearSelector();
 
@@ -2511,8 +2535,13 @@ function toggleWholeBook(bIdx) {
     else { readChapters.add(key); }
   }
 
-  // Persist
-  saveReadChapters(readChapters, activeYear);
+  // Persistir cada capítulo no Supabase
+  if (currentUser) {
+    for (let c = 1; c <= book.ch; c++) {
+      const key = book.abbr + ':' + c;
+      saveChapterToDB(book.abbr, c, activeYear, !allRead);
+    }
+  }
 
   // Update all chapter buttons visually
   for (let c = 1; c <= book.ch; c++) {
@@ -2548,13 +2577,18 @@ function countBookRead(book) {
 }
 
 function toggleChapter(key, bIdx, book) {
-  if (readChapters.has(key)) {
+  const wasRead = readChapters.has(key);
+  if (wasRead) {
     readChapters.delete(key);
   } else {
     readChapters.add(key);
   }
 
-  saveReadChapters(readChapters, activeYear);
+  // Persistir no Supabase (async, não bloqueia UI)
+  if (currentUser) {
+    const [abbr, chStr] = key.split(':');
+    saveChapterToDB(abbr, parseInt(chStr), activeYear, !wasRead);
+  }
 
   // Update only this button visually — do NOT re-render the list
   const btn = document.querySelector(`.ch-btn[data-key="${key}"]`);
@@ -2625,41 +2659,46 @@ function getChurchOnTrackPct() {
   return expectedPct;
 }
 
-function getUserProgress(email) {
-  const yr = activeYear;
-  const key = 'fer_read_' + email + '_' + yr;
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return 0;
-    const chapters = JSON.parse(raw);
-    return Math.round(chapters.length / TOTAL_CHAPTERS * 100);
-  } catch { return 0; }
+// getUserProgress agora é async — o painel usa cache gerado em renderMasterPanel
+function getUserProgress(userIdOrPct) {
+  // Aceita pct direto (passado pelo renderMasterPanel após query)
+  return typeof userIdOrPct === 'number' ? userIdOrPct : 0;
 }
 
-function renderMasterPanel() {
-  const allUsers = loadAllUsers();
+async function renderMasterPanel() {
+  document.getElementById('masterRanking').innerHTML = '<div style="color:#aaa;font-size:12px;padding:8px 0">Carregando…</div>';
+  document.getElementById('masterUserList').innerHTML = '';
+
+  const allUsers = await loadAllUsers();
   const churchExpectedPct = getChurchOnTrackPct();
 
-  // Calcular % de membros "em dia" (progresso >= esperado pela Igreja)
-  const activeUsers = allUsers.filter(u => u.ativo !== false);
-  const onTrack = activeUsers.filter(u => getUserProgress(u.email) >= churchExpectedPct);
+  // Buscar progresso de todos os usuários em paralelo
+  const progressPromises = allUsers.map(async u => {
+    const { data } = await supa
+      .from('reading_progress')
+      .select('id', { count: 'exact' })
+      .eq('user_id', u.id)
+      .eq('year', activeYear);
+    const count = data ? data.length : 0;
+    return { ...u, pct: Math.round(count / TOTAL_CHAPTERS * 100) };
+  });
+  const usersWithPct = await Promise.all(progressPromises);
+
+  const activeUsers = usersWithPct.filter(u => u.ativo !== false);
+  const onTrack = activeUsers.filter(u => u.pct >= churchExpectedPct);
   const onTrackPct = activeUsers.length > 0
     ? Math.round(onTrack.length / activeUsers.length * 100)
     : 0;
 
   document.getElementById('masterOnTrack').textContent = onTrackPct + '%';
   document.getElementById('masterOnTrackLabel').textContent =
-    'dos membros ativos estão em dia com a leitura (plano da Igreja: ' + churchExpectedPct + '%)';
+    'dos membros ativos estão em dia (plano da Igreja: ' + churchExpectedPct + '%)';
 
-  // Ranking: todos com % de progresso, ordenado decrescente
-  const usersWithPct = allUsers.map(u => ({
-    ...u,
-    pct: getUserProgress(u.email)
-  })).sort((a, b) => b.pct - a.pct);
-
+  // Ranking
+  const sorted = [...usersWithPct].sort((a, b) => b.pct - a.pct);
   const rankEl = document.getElementById('masterRanking');
   rankEl.innerHTML = '';
-  usersWithPct.forEach((u, i) => {
+  sorted.forEach((u, i) => {
     const row = document.createElement('div');
     row.className = 'ranking-row';
     row.innerHTML =
@@ -2669,86 +2708,73 @@ function renderMasterPanel() {
     rankEl.appendChild(row);
   });
 
-  // Lista completa de usuários com ações
+  // Lista completa
   const listEl = document.getElementById('masterUserList');
   listEl.innerHTML = '';
-  allUsers.forEach(u => {
-    const pct = getUserProgress(u.email);
+  usersWithPct.forEach(u => {
     const isAtivo = u.ativo !== false;
     const isMaster = u.perfil === 'master';
-    const lastLogin = u.lastLogin
-      ? new Date(u.lastLogin).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit'})
-      : 'nunca';
-
     const card = document.createElement('div');
     card.className = 'master-user-card';
     card.innerHTML =
       '<div class="master-user-name">' + u.nome + ' ' + u.sobrenome + '</div>' +
-      '<div class="master-user-email">' + u.email + '</div>' +
       '<div class="master-user-meta">' +
         '<span class="master-badge ' + (isMaster ? 'perfil-master' : 'perfil-comum') + '">' +
           (isMaster ? 'Master' : 'Comum') + '</span>' +
         '<span class="master-badge ' + (isAtivo ? 'status-ativo' : 'status-inativo') + '">' +
           (isAtivo ? 'Ativo' : 'Inativo') + '</span>' +
-        '<span class="master-user-pct">' + pct + '% lido</span>' +
+        '<span class="master-user-pct">' + u.pct + '% lido</span>' +
       '</div>' +
-      '<div class="master-user-login">Último login: ' + lastLogin + '</div>' +
-      '<div class="master-user-actions" id="actions_' + u.email.replace(/[@.]/g,'_') + '"></div>';
+      '<div class="master-user-actions"></div>';
     listEl.appendChild(card);
 
     const actionsEl = card.querySelector('.master-user-actions');
-
-    // Botão ativar/inativar (não se aplica ao próprio usuário logado)
-    if (u.email !== currentUser.email) {
+    if (u.id !== currentUser.id) {
       const btnToggle = document.createElement('button');
       btnToggle.className = 'master-btn ' + (isAtivo ? 'btn-inativar' : 'btn-ativar');
       btnToggle.textContent = isAtivo ? 'Inativar' : 'Ativar';
-      btnToggle.onclick = () => masterToggleAtivo(u.email, !isAtivo);
+      btnToggle.onclick = () => masterToggleAtivo(u.id, !isAtivo);
       actionsEl.appendChild(btnToggle);
-    }
 
-    // Botão promover/rebaixar (não se aplica ao próprio usuário logado)
-    if (u.email !== currentUser.email) {
       const btnPerfil = document.createElement('button');
       btnPerfil.className = 'master-btn ' + (isMaster ? 'btn-rebaixar' : 'btn-promover');
       btnPerfil.textContent = isMaster ? 'Rebaixar' : 'Promover a Master';
-      btnPerfil.onclick = () => masterTogglePerfil(u.email, isMaster ? 'comum' : 'master');
+      btnPerfil.onclick = () => masterTogglePerfil(u.id, isMaster ? 'comum' : 'master');
       actionsEl.appendChild(btnPerfil);
     }
   });
 }
 
-function loadAllUsers() {
-  try {
-    const raw = localStorage.getItem('fer_users');
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+async function loadAllUsers() {
+  const { data, error } = await supa
+    .from('profiles')
+    .select('id, nome, sobrenome, perfil, ativo, created_at');
+  if (error || !data) return [];
+  // Para cada user, buscar o email de auth.users não é possível via anon key
+  // Usamos o id como referência
+  return data.map(p => ({
+    id: p.id,
+    nome: p.nome,
+    sobrenome: p.sobrenome,
+    perfil: p.perfil,
+    ativo: p.ativo,
+    email: p.id  // placeholder — mostramos nome/sobrenome no painel
+  }));
 }
 
-function saveAllUsers(users) {
-  localStorage.setItem('fer_users', JSON.stringify(users));
+async function masterToggleAtivo(userId, novoAtivo) {
+  await supa.from('profiles').update({ ativo: novoAtivo }).eq('id', userId);
+  renderMasterPanel();
 }
 
-function masterToggleAtivo(email, novoAtivo) {
-  const users = loadAllUsers();
-  const u = users.find(x => x.email === email);
-  if (u) {
-    u.ativo = novoAtivo;
-    saveAllUsers(users);
-    renderMasterPanel();
-  }
+async function masterTogglePerfil(userId, novoPerfil) {
+  await supa.from('profiles').update({ perfil: novoPerfil }).eq('id', userId);
+  renderMasterPanel();
 }
 
-function masterTogglePerfil(email, novoPerfil) {
-  const users = loadAllUsers();
-  const u = users.find(x => x.email === email);
-  if (u) {
-    u.perfil = novoPerfil;
-    saveAllUsers(users);
-    renderMasterPanel();
-  }
-}
 
+// Inicializar sessão Supabase
+initSession();
 
 </script>
 </body>
