@@ -1116,7 +1116,7 @@
 <div class="panel" id="panelLogin">
   <div class="panel-header">
     <button class="panel-back" onclick="closePanel('panelLogin')">←</button>
-    <span class="panel-title">Acesso <span style="font-size:10px;opacity:0.4;font-weight:300;">v1.0</span></span>
+    <span class="panel-title">Acesso <span style="font-size:10px;opacity:0.4;font-weight:300;">v1.1</span></span>
   </div>
   <div class="panel-body">
     <div class="login-wrap">
@@ -2069,19 +2069,26 @@ async function loadProfile(authUser) {
 supa.auth.onAuthStateChange(async (event, session) => {
   console.log('[Auth]', event, session?.user?.email);
   if (event === 'SIGNED_IN' && session) {
-    await loadProfile(session.user);
-    console.log('[Auth] currentUser após loadProfile:', currentUser);
+    console.log('[Auth] iniciando loadProfile...');
+    try {
+      await loadProfile(session.user);
+    } catch(e) {
+      console.error('[Auth] loadProfile exception:', e);
+    }
+    console.log('[Auth] currentUser:', currentUser);
     if (!currentUser) {
-      // Profile ainda não existe — cria agora
+      console.log('[Auth] profile nao encontrado, criando...');
       const meta = session.user.user_metadata || {};
-      await supa.from('profiles').upsert({
+      const { error: upsertErr } = await supa.from('profiles').upsert({
         id: session.user.id,
         nome: meta.nome || session.user.email.split('@')[0],
         sobrenome: meta.sobrenome || '',
         perfil: 'comum',
         ativo: true
       });
+      console.log('[Auth] upsert error:', upsertErr);
       await loadProfile(session.user);
+      console.log('[Auth] currentUser apos upsert:', currentUser);
     }
     readChapters = await loadReadChaptersFromDB(activeYear);
     closePanel('panelLogin');
